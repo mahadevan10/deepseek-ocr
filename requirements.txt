@@ -14,3 +14,5 @@ langchain-qdrant
 sentence-transformers
 einops
 timm
+addict
+matplotlib

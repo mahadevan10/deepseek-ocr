@@ -1,6 +1,6 @@
 fastapi
 uvicorn[standard]
-transformers
+transformers==4.45.0
 Pillow
 python-multipart
 qdrant-client

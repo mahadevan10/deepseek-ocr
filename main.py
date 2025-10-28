@@ -1,104 +1,120 @@
 import os
+import threading
+import uuid
 import torch
 from fastapi import FastAPI, UploadFile, File, HTTPException
 from transformers import AutoModel, AutoTokenizer
-from PIL import Image
-import io
 from qdrant_client import QdrantClient, models
-import uuid
 from dotenv import load_dotenv
-from pdf2image import convert_from_bytes  # For PDF to image conversion
-from langchain_qdrant import QdrantVectorStore  # Using LangChain for Qdrant integration
-from langchain_core.documents import Document
+from pdf2image import convert_from_bytes
+from langchain_qdrant import QdrantVectorStore
 from langchain.embeddings.sentence_transformer import SentenceTransformerEmbeddings
 
 load_dotenv()
 
-# --- Initialize FastAPI and Qdrant Client ---
 app = FastAPI()
 
-QDRANT_URL = os.getenv("QDRANT_URL")
-QDRANT_API_KEY = os.getenv("QDRANT_API_KEY")
+# Globals initialized lazily to let the server bind PORT fast
+_model = None
+_tokenizer = None
+_qdrant = None
+_vectorstore = None
+_init_lock = threading.Lock()
 
-if not QDRANT_URL or not QDRANT_API_KEY:
-    raise RuntimeError("QDRANT_URL and QDRANT_API_KEY must be set as environment variables.")
-
-qdrant_client = QdrantClient(
-    url=QDRANT_URL,
-    api_key=QDRANT_API_KEY,
-)
-
-# --- Model Loading (Using Transformers for Vision Encoder Extraction, Compatible with vLLM Model) ---
-model_path = "deepseek-ai/deepseek-ocr"  # vLLM-compatible model
-tokenizer = AutoTokenizer.from_pretrained(model_path, trust_remote_code=True)
-device = "cuda" if torch.cuda.is_available() else "cpu"
-print(f"Using device: {device}")
-
-model = AutoModel.from_pretrained(
-    model_path,
-    trust_remote_code=True,
-    torch_dtype=torch.bfloat16,
-    _attn_implementation='flash_attention_2',
-    use_safetensors=True,
-).eval().to(device)
-
-# LangChain setup for text embedding (fallback if needed) and vector store
-embedder = SentenceTransformerEmbeddings(model_name="all-MiniLM-L6-v2")  # 384-dimensional vectors
 QDRANT_COLLECTION_NAME = "document_vectors"
-VECTOR_DIMENSION = 1024  # DeepSeek-OCR vision encoder output dimension
+VECTOR_DIMENSION = 1024  # expected DeepSeek-OCR vision encoder output
+DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
-# Initialize LangChain QdrantVectorStore
-vectorstore = QdrantVectorStore(
-    client=qdrant_client,
-    collection_name=QDRANT_COLLECTION_NAME,
-    embedding=embedder,  # Used for metadata, but we'll store custom vectors
-)
 
-# Ensure the collection exists
-try:
-    qdrant_client.recreate_collection(
-        collection_name=QDRANT_COLLECTION_NAME,
-        vectors_config=models.VectorParams(size=VECTOR_DIMENSION, distance=models.Distance.COSINE),
-    )
-    print(f"Qdrant collection '{QDRANT_COLLECTION_NAME}' created/recreated.")
-except Exception as e:
-    print(f"Could not create Qdrant collection: {e}")
+def _ensure_initialized():
+    global _model, _tokenizer, _qdrant, _vectorstore
+    if _model is not None and _tokenizer is not None and _qdrant is not None:
+        return
+    with _init_lock:
+        if _model is not None and _tokenizer is not None and _qdrant is not None:
+            return
 
-# --- API Endpoint for PDF Processing and Visual Token Embedding Storage ---
+        qdrant_url = os.getenv("QDRANT_URL")
+        qdrant_key = os.getenv("QDRANT_API_KEY")
+        if not qdrant_url or not qdrant_key:
+            raise RuntimeError("QDRANT_URL and QDRANT_API_KEY must be set as environment variables.")
+
+        # Create Qdrant client with a reasonable timeout to avoid blocking startup too long
+        _qdrant = QdrantClient(url=qdrant_url, api_key=qdrant_key, timeout=20.0)
+
+        # Create collection if missing (idempotent)
+        try:
+            _qdrant.recreate_collection(
+                collection_name=QDRANT_COLLECTION_NAME,
+                vectors_config=models.VectorParams(size=VECTOR_DIMENSION, distance=models.Distance.COSINE),
+            )
+        except Exception as e:
+            # If collection exists or network hiccup, continue; you can add better handling/logging
+            print(f"Qdrant collection setup notice: {e}")
+
+        # LangChain vectorstore (not used for vectorization here; we store custom vectors)
+        embedder = SentenceTransformerEmbeddings(model_name="all-MiniLM-L6-v2")
+        _vectorstore = QdrantVectorStore(
+            client=_qdrant,
+            collection_name=QDRANT_COLLECTION_NAME,
+            embedding=embedder,
+        )
+
+        # Load tokenizer/model lazily
+        model_path = "deepseek-ai/deepseek-ocr"
+        _tokenizer = AutoTokenizer.from_pretrained(model_path, trust_remote_code=True)
+
+        # Avoid forcing flash-attn; let HF pick the best available implementation
+        dtype = torch.bfloat16 if DEVICE == "cuda" else torch.float32
+        _model = AutoModel.from_pretrained(
+            model_path,
+            trust_remote_code=True,
+            torch_dtype=dtype,
+            use_safetensors=True,
+        ).eval().to(DEVICE)
+
+        print(f"Initialized. Device={DEVICE}")
+
+
+@app.get("/healthz")
+def healthz():
+    return {"status": "ok"}
+
+
+@app.get("/")
+def read_root():
+    return {"message": "DeepSeek OCR PDF processing service is running. POST PDF to /process-pdf-and-store."}
+
+
 @app.post("/process-pdf-and-store")
 async def process_pdf_and_store(file: UploadFile = File(...)):
-    """
-    Receives a PDF, converts pages to images, extracts visual tokens (embeddings) using DeepSeek-OCR's vision encoder (vLLM-compatible), and stores them in Qdrant.
-    Each page is stored as a separate vector.
-    """
-    if not file.filename.lower().endswith('.pdf'):
+    if not file.filename.lower().endswith(".pdf"):
         raise HTTPException(status_code=400, detail="Only PDF files are supported.")
 
+    _ensure_initialized()
+
     pdf_bytes = await file.read()
-
     try:
-        # Convert PDF to images (one per page)
-        images = convert_from_bytes(pdf_bytes, dpi=150)  # Adjust DPI as needed for quality
-
+        images = convert_from_bytes(pdf_bytes, dpi=150)
         stored_pages = []
+
         for page_num, pil_image in enumerate(images, start=1):
             pil_image = pil_image.convert("RGB")
 
-            # Prepare inputs for vision encoder
-            prepare_inputs = tokenizer.apply_chat_template(
+            # Prepare inputs for the model (DeepSeek-OCR remote code supports images in chat template)
+            inputs = _tokenizer.apply_chat_template(
                 [{"role": "user", "content": [{"type": "image"}]}],
                 images=[pil_image],
-                return_tensors="pt"
-            ).to(device)
+                return_tensors="pt",
+            ).to(DEVICE)
 
-            # Extract visual tokens using the vision encoder (compatible with vLLM model architecture)
             with torch.no_grad():
-                visual_tokens = model.vision_encoder(prepare_inputs['pixel_values'].to(torch.bfloat16))[0]
+                # Expect remote code to expose a vision encoder returning visual tokens
+                visual_tokens = _model.vision_encoder(inputs["pixel_values"])[0]  # [B, T, D]
             document_vector = torch.mean(visual_tokens, dim=1).squeeze().cpu().numpy().tolist()
 
-            # Store in Qdrant (each page as a separate point)
             point_id = str(uuid.uuid4())
-            qdrant_client.upsert(
+            _qdrant.upsert(
                 collection_name=QDRANT_COLLECTION_NAME,
                 points=[
                     models.PointStruct(
@@ -107,27 +123,19 @@ async def process_pdf_and_store(file: UploadFile = File(...)):
                         payload={
                             "filename": file.filename,
                             "page_number": page_num,
-                            "total_pages": len(images)
-                        }
+                            "total_pages": len(images),
+                        },
                     )
                 ],
-                wait=True
+                wait=True,
             )
 
-            stored_pages.append({
-                "page_number": page_num,
-                "point_id": point_id
-            })
+            stored_pages.append({"page_number": page_num, "point_id": point_id})
 
         return {
             "message": f"PDF processed and {len(images)} pages stored as visual token embeddings.",
             "filename": file.filename,
-            "stored_pages": stored_pages
+            "stored_pages": stored_pages,
         }
-
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"An error occurred: {str(e)}")
-
-@app.get("/")
-def read_root():
-    return {"message": "DeepSeek OCR PDF processing service (vLLM-compatible) is running. POST PDF to /process-pdf-and-store."}

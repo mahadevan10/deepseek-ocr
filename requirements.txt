@@ -14,3 +14,4 @@ einops
 timm
 addict
 matplotlib
+gunicorn  # Added for production server in Dockerfile

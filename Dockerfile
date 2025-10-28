@@ -23,10 +23,9 @@ RUN pip3 install --upgrade pip && \
 COPY requirements.txt requirements.txt
 RUN pip3 install -r requirements.txt
 
-# App code and DeepSeek-OCR sources
+# App code (and optional local model sources)
 COPY DeepSeek-OCR ./models/DeepSeek-OCR
 COPY . .
 
-# Cloud Run listens on $PORT
 EXPOSE 8080
 CMD ["sh", "-c", "gunicorn -w 1 -k uvicorn.workers.UvicornWorker -b 0.0.0.0:$PORT main:app"]

@@ -14,3 +14,9 @@ env/
 
 # Local model cache (if any)
 .cache/
+
+# Environment variables
+.env
+
+# macOS system files
+.DS_Store

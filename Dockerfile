@@ -1,5 +1,5 @@
-# Use a base image with CUDA support. This image is over 10GB.
-FROM nvidia/cuda:12.1.1-runtime-ubuntu22.04
+# Use a base image with CUDA support (changed to 11.8 for cu118 compatibility)
+FROM nvidia/cuda:11.8-runtime-ubuntu22.04
 
 # Set up the environment and install Python and Git LFS
 ENV DEBIAN_FRONTEND=noninteractive
@@ -12,6 +12,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 # Set the working directory inside the container
 WORKDIR /app
+
+# Install PyTorch with CUDA support first (before other deps)
+RUN pip3 install torch==2.6.0 torchvision==0.21.0 torchaudio==2.6.0 --index-url https://download.pytorch.org/whl/cu118
+
+# Install vLLM and flash-attn
+RUN pip3 install https://github.com/vllm-project/vllm/releases/download/v0.8.5/vllm-0.8.5+cu118-cp38-abi3-manylinux1_x86_64.whl
+RUN pip3 install flash-attn==2.7.3 --no-build-isolation
 
 # Copy and install Python dependencies
 COPY requirements.txt requirements.txt

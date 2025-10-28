@@ -8,7 +8,8 @@ from qdrant_client import QdrantClient, models
 from dotenv import load_dotenv
 from pdf2image import convert_from_bytes
 from langchain_qdrant import QdrantVectorStore
-from langchain.embeddings.sentence_transformer import SentenceTransformerEmbeddings
+# FIX: updated import path for current LangChain
+from langchain_community.embeddings import SentenceTransformerEmbeddings
 
 load_dotenv()
 

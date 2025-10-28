@@ -1,5 +1,5 @@
-# Use a base image with CUDA support (changed to 11.8 for cu118 compatibility)
-FROM nvidia/cuda:11.8-runtime-ubuntu22.04
+# Use a base image with CUDA support (corrected tag for 11.8)
+FROM nvidia/cuda:11.8.0-runtime-ubuntu22.04
 
 # Set up the environment and install Python and Git LFS
 ENV DEBIAN_FRONTEND=noninteractive

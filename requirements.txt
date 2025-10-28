@@ -1,0 +1,16 @@
+fastapi
+uvicorn[standard]
+torch
+torchvision
+transformers
+Pillow
+python-multipart
+qdrant-client
+python-dotenv
+pdf2image
+langchain
+langchain-community
+langchain-qdrant
+sentence-transformers
+einops
+timm

@@ -1,0 +1,48 @@
+# Exclude version control
+.git
+.gitignore
+
+# Exclude Python cache and bytecode
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.Python
+
+# Exclude virtual environments
+env
+venv
+.venv
+
+# Exclude logs and temporary files
+*.log
+*.tmp
+*.swp
+*.swo
+
+# Exclude IDE and editor files
+.vscode
+.idea
+*.sublime-project
+*.sublime-workspace
+
+# Exclude OS files
+.DS_Store
+Thumbs.db
+
+# Exclude build and distribution files
+build
+dist
+*.egg-info
+
+# Exclude test and coverage files
+.coverage
+.pytest_cache
+.mypy_cache
+.tox
+
+# Exclude node modules if any
+node_modules
+
+# Exclude cloned repo's git if not needed (optional, to reduce size)
+DeepSeek-OCR/.git

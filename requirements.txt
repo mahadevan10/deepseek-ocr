@@ -11,3 +11,4 @@ timm
 addict
 matplotlib
 gunicorn
+easydict

@@ -48,7 +48,7 @@ def _ensure_initialized():
         except Exception as e:
             print(f"Qdrant collection setup notice: {e}")
 
-        # Load tokenizer/model lazily
+        # Load tokenizer/model lazil
         model_path = "deepseek-ai/deepseek-ocr"
         _tokenizer = AutoTokenizer.from_pretrained(model_path, trust_remote_code=True)
 

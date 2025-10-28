@@ -36,5 +36,5 @@ RUN python3 -c "import torch; from transformers import AutoModel, AutoTokenizer;
 # Expose the port (Cloud Run sets PORT dynamically)
 EXPOSE 8080
 
-# Command to run the application using uvicorn with dynamic PORT
-CMD ["sh", "-c", "uvicorn main:app --host 0.0.0.0 --port $PORT"]
+# Command to run the application using gunicorn with uvicorn workers and dynamic PORT
+CMD ["sh", "-c", "gunicorn -w 1 -k uvicorn.workers.UvicornWorker -b 0.0.0.0:$PORT main:app"]

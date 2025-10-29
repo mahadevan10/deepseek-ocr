@@ -14,3 +14,5 @@ gunicorn
 easydict
 sentence-transformers
 open-clip-torch
+torch==2.6.0+cu118
+PyMuPDF

@@ -12,3 +12,5 @@ addict
 matplotlib
 gunicorn
 easydict
+sentence-transformers
+open-clip-torch
